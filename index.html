@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Certificate Verification - Newcastle College Ltd</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+    :root{--brand:#003366;--accent:#00509e}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:#f5f9ff;color:#012f6b;min-height:100vh;display:flex;flex-direction:column}
+    header{background:var(--brand);color:#fff;padding:1rem 1.5rem;text-align:center}
+    main{max-width:900px;margin:1.5rem auto;padding:1.5rem;background:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(2,17,55,.06)}
+    h1,h2{margin:.25rem 0}
+    .controls{display:flex;gap:12px;flex-wrap:wrap;margin:1rem 0}
+    input[type=text]{width:100%;padding:.6rem;border:1.5px solid var(--brand);border-radius:8px}
+    button{font:inherit}
+    .primary{background:var(--brand);color:#fff;border:none;padding:.65rem 1rem;border-radius:8px;cursor:pointer}
+    .ghost{background:#fff;border:1px solid #dbe8ff;color:var(--brand);padding:.5rem .8rem;border-radius:8px;cursor:pointer}
+    #reader{display:none;margin:1rem auto;max-width:420px;border:3px solid var(--accent);border-radius:12px;overflow:hidden;aspect-ratio:1/1;background:#000}
+    #status{margin-top:.5rem}
+    .verified{background:#e6f9ec;border:1px solid #2e7d32;color:#1f5f2f;padding:1rem;border-radius:8px}
+    .notfound{background:#fff1f1;border:1px solid #c62828;color:#8a1e1e;padding:1rem;border-radius:8px}
+    #admin-panel{display:none;margin-top:1rem;padding:1rem;border-radius:10px;border:2px dashed #dbe8ff;background:#fff}
+    table{width:100%;border-collapse:collapse;margin-top:.75rem}
+    th,td{padding:.5rem;border:1px solid #e6eef8;text-align:left}
+    th{background:#f3f8ff}
+    .small{font-size:.9rem}
+    .muted{color:#556;font-size:.9rem}
+    .banner{padding:.6rem;border-radius:8px;margin-top:.75rem}
+    .warning{background:#fff9e6;border:1px solid #ffd27a;color:#6b4a00}
+    .error{background:#ffecec;border:1px solid #f5c2c2;color:#6b1e1e}
+    .flex{display:flex;gap:.5rem;align-items:center}
+    .qr-preview img{max-width:180px;border-radius:8px;border:1px solid #e6eef8}
+    footer{background:#012f6b;color:#fff;padding:.8rem;text-align:center;margin-top:1.5rem}
+  </style>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Newcastle College Ltd — Certificate Verification</h1>
+  </header>
+
+  <main>
+    <h2>Verify Your Qualification</h2>
+    <p class="muted">Scan the QR on a certificate or enter the Qualification Number and Candidate Name to verify.</p>
+
+    <div class="controls">
+      <button id="startScan" class="primary">📷 Start Scanner</button>
+      <button id="stopScan" class="ghost" style="display:none">✕ Stop Scanner</button>
+      <button id="selfTest" class="ghost">▶ Run Self-test</button>
+    </div>
+
+    <div id="reader" aria-hidden="true"></div>
+
+    <form id="verifyForm" autocomplete="off">
+      <label class="small">Qualification Number</label>
+      <input type="text" id="qualificationNumber" placeholder="e.g. NC-2025-001234" />
+      <label class="small" style="margin-top:.5rem">Candidate Name</label>
+      <input type="text" id="name" placeholder="e.g. Jane Doe" />
+      <div style="margin-top:10px"><button type="submit" class="primary">Verify Certificate</button></div>
+    </form>
+
+    <div id="loading" style="display:none;margin-top:.75rem">Checking...</div>
+    <div id="status"></div>
+
+    <div id="apiNotice" class="banner warning" style="display:none;margin-top:1rem"></div>
+    <div id="apiError" class="banner error" style="display:none;margin-top:1rem"></div>
+
+    <div id="admin-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="margin:0">🔒 Admin Panel</h3>
+        <div class="flex"><button id="refreshListBtn" class="ghost">🔄 Refresh</button></div>
+      </div>
+
+      <div style="margin-top:.5rem;overflow:auto;max-height:320px">
+        <table id="certTable"><thead><tr><th>QualificationNumber</th><th>Name</th><th>Level</th><th>AwardedBy</th><th>Year</th><th>Actions</th></tr></thead><tbody></tbody></table>
+      </div>
+
+      <h4 style="margin-top:.8rem">Add New Certificate</h4>
+      <form id="addCertForm">
+        <input name="QualificationNumber" placeholder="Qualification Number" required style="margin-top:.5rem" />
+        <input name="Name" placeholder="Name" required style="margin-top:.5rem" />
+        <input name="Level" placeholder="Level" style="margin-top:.5rem" />
+        <input name="AwardedBy" placeholder="Awarded By" style="margin-top:.5rem" />
+        <input name="Year" placeholder="Year" style="margin-top:.5rem" />
+        <div style="display:flex;gap:.5rem;margin-top:.6rem"><button type="submit" class="primary">Add & Generate QR</button><button type="button" id="hideAdmin" class="ghost">Close</button></div>
+      </form>
+
+      <div id="qrCodeContainer" class="qr-preview" style="margin-top:.75rem"></div>
+    </div>
+  </main>
+
+  <footer>© Newcastle College Ltd</footer>
+
+  <script>
+    const ADMIN_PASSWORD = 'sex126';
+    const BACKEND_LIST_ADD = 'https://script.google.com/macros/s/AKfycbx7JBVUAuaqmBVSuLPFJF0b0roc2-J9TGBT7WvepXHonW_8K0_k_qkHRcABeAqmD1YJhg/exec';
+    const BACKEND_DELETE = 'https://script.google.com/macros/s/AKfycbyKMPnASKojj0TNZwEkUp8uzevIkLIPtZ7acUaDEVnh7xdc-PC0ei48pvkg_RALsU2-LQ/exec';
+
+    let scanner = null;
+    let usingMock = false;
+    const mockRecords = [
+      { QualificationNumber: 'NC-2025-001234', Name: 'Jane Doe', Level: 'Level 4 BTEC', AwardedBy: 'Newcastle College Ltd', Year: '2025' },
+      { QualificationNumber: 'NC-2025-005678', Name: 'John Smith', Level: 'Level 3 NVQ', AwardedBy: 'Newcastle College Ltd', Year: '2025' }
+    ];
+
+    const readerEl = document.getElementById('reader');
+    const startBtn = document.getElementById('startScan');
+    const stopBtn = document.getElementById('stopScan');
+    const loadingEl = document.getElementById('loading');
+    const statusEl = document.getElementById('status');
+    const apiNotice = document.getElementById('apiNotice');
+    const apiError = document.getElementById('apiError');
+
+    function setApiNotice(msg){apiNotice.style.display = msg ? 'block' : 'none'; apiNotice.textContent = msg || ''}
+    function setApiError(msg){apiError.style.display = msg ? 'block' : 'none'; apiError.textContent = msg || ''}
+
+    function timeoutFetch(url, opts = {}, ms = 8000){
+      return new Promise((resolve, reject) => {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), ms);
+        fetch(url, Object.assign({}, opts, { signal: controller.signal })).then(r => { clearTimeout(id); resolve(r); }).catch(err => { clearTimeout(id); reject(err); });
+      });
+    }
+
+    async function backendList(){
+      try{
+        const res = await timeoutFetch(BACKEND_LIST_ADD, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'list' }) }, 8000);
+        if(!res.ok) throw new Error('Bad response');
+        const data = await res.json();
+        if(!data || !Array.isArray(data.records)) throw new Error('Unexpected response format');
+        usingMock = false; setApiNotice('Connected to backend. Live data will be used.'); setApiError('');
+        return data.records;
+      }catch(err){
+        usingMock = true; setApiNotice('Using local fallback data (backend unavailable).'); setApiError('Fetch failed — possible CORS or network issue. Check Apps Script deployment and CORS.');
+        return mockRecords.slice();
+      }
+    }
+
+    async function backendAdd(record){
+      try{
+        const res = await timeoutFetch(BACKEND_LIST_ADD, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(Object.assign({ action: 'add' }, record)) }, 8000);
+        if(!res.ok) throw new Error('Bad response');
+        const data = await res.json();
+        if(data && data.success) return { ok: true };
+        throw new Error(data && data.error ? data.error : 'Add failed');
+      }catch(err){
+        usingMock = true; setApiNotice('Using local fallback data (backend unavailable).'); setApiError('Add failed to backend — record saved locally for testing.'); mockRecords.push(record); return { ok: false, local: true };
+      }
+    }
+
+    async function backendDelete(record){
+      try{
+        const res = await timeoutFetch(BACKEND_DELETE, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(Object.assign({ action: 'delete' }, record)) }, 8000);
+        if(!res.ok) throw new Error('Bad response');
+        const data = await res.json();
+        if(data && data.success) return { ok: true };
+        throw new Error(data && data.error ? data.error : 'Delete failed');
+      }catch(err){
+        usingMock = true; setApiNotice('Using local fallback data (backend unavailable).'); setApiError('Delete failed to backend — record removed locally for testing.'); const idx = mockRecords.findIndex(r => r.QualificationNumber === record.QualificationNumber && r.Name === record.Name); if(idx>-1) mockRecords.splice(idx,1); return { ok:false, local:true };
+      }
+    }
+
+    function textEqual(a,b){return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase()}
+
+    function renderVerified(rec){statusEl.innerHTML = `<div class="verified">✅ <strong>VERIFIED</strong><br><b>Name:</b> ${escapeHtml(rec.Name)}<br><b>Qualification:</b> ${escapeHtml(rec.QualificationNumber)}<br><b>Level:</b> ${escapeHtml(rec.Level||'')}<br><b>Awarded By:</b> ${escapeHtml(rec.AwardedBy||'')}<br><b>Year:</b> ${escapeHtml(rec.Year||'')}</div>`}
+
+    function renderNotFound(){statusEl.innerHTML = `<div class="notfound">❌ <strong>NOT FOUND</strong><br>The qualification number or candidate name appears invalid or unregistered.</div>`}
+
+    function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'' :'&#39;'}[c]})}
+
+    document.getElementById('verifyForm').addEventListener('submit', async (ev)=>{ev.preventDefault();await verifyQualification();});
+
+    async function verifyQualification(){
+      const qual = document.getElementById('qualificationNumber').value.trim();
+      const name = document.getElementById('name').value.trim();
+      if(!qual || !name) return;
+      loadingEl.style.display = 'block'; statusEl.innerHTML='';
+      const records = await backendList();
+      loadingEl.style.display = 'none';
+      const found = records.find(r=>textEqual(r.QualificationNumber,qual) && textEqual(r.Name,name));
+      if(found) renderVerified(found); else renderNotFound();
+    }
+
+    async function startScanner(){
+      startBtn.disabled = true; stopBtn.style.display = 'inline-block'; readerEl.style.display = 'block';
+      if(!window.Html5Qrcode) { setApiError('QR library not loaded'); startBtn.disabled=false; return }
+      if(scanner) return;
+      scanner = new Html5Qrcode('reader');
+      try{ await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, onScanSuccess, ()=>{}); }catch(err){ setApiError('Unable to access camera: '+(err && err.message || err)); stopScanner(); }
+    }
+
+    function onScanSuccess(decoded){ let qual='', full=''; try{ const t = String(decoded).trim(); if(t.startsWith('{')){ const obj = JSON.parse(t); qual = obj.qualificationNumber||obj.QualificationNumber||''; full = obj.name||obj.Name||'' } else { const parts = t.split('|'); qual = parts[0]||''; full = parts.slice(1).join('|')||'' } }catch(e){ const parts = String(decoded).split('|'); qual = parts[0]||''; full = parts.slice(1).join('|')||'' } if(qual && full){ document.getElementById('qualificationNumber').value = qual; document.getElementById('name').value = full; verifyQualification(); stopScanner() } }
+
+    function stopScanner(){ if(!scanner){ readerEl.style.display='none'; stopBtn.style.display='none'; startBtn.disabled=false; return } scanner.stop().then(()=>{ scanner.clear(); scanner = null; readerEl.style.display='none'; stopBtn.style.display='none'; startBtn.disabled=false }).catch(()=>{ scanner=null; readerEl.style.display='none'; stopBtn.style.display='none'; startBtn.disabled=false }) }
+
+    stopBtn.addEventListener('click', stopScanner); startBtn.addEventListener('click', startScanner);
+
+    document.addEventListener('keydown', async (e)=>{ if(e.ctrlKey && e.shiftKey && e.key.toLowerCase()==='a'){ e.preventDefault(); const panel = document.getElementById('admin-panel'); if(panel.style.display==='block'){ panel.style.display='none'; return } const pass = prompt('Enter admin password:'); if(pass===ADMIN_PASSWORD){ panel.style.display='block'; await fetchCertificates() } else alert('Incorrect password') } });
+
+    async function fetchCertificates(){ const tbody = document.querySelector('#certTable tbody'); tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>'; try{ const records = await backendList(); tbody.innerHTML = ''; records.forEach(r=>{ const tr = document.createElement('tr'); const q = escapeHtml(r.QualificationNumber||''); const n = escapeHtml(r.Name||''); const l = escapeHtml(r.Level||''); const a = escapeHtml(r.AwardedBy||''); const y = escapeHtml(r.Year||''); tr.innerHTML = `<td>${q}</td><td>${n}</td><td>${l}</td><td>${a}</td><td>${y}</td><td></td>`; const actionsCell = tr.querySelector('td:last-child'); const delBtn = document.createElement('button'); delBtn.textContent='🗑️'; delBtn.className='ghost'; delBtn.addEventListener('click', ()=>deleteCertificate(r.QualificationNumber, r.Name)); const qrBtn = document.createElement('button'); qrBtn.textContent='📥 QR'; qrBtn.className='ghost'; qrBtn.style.marginLeft='8px'; qrBtn.addEventListener('click', ()=>generateQRCode(r.QualificationNumber, r.Name)); actionsCell.appendChild(delBtn); actionsCell.appendChild(qrBtn); tbody.appendChild(tr); }); }catch(err){ console.error(err); tbody.innerHTML = '<tr><td colspan="6">Error loading records.</td></tr>' } }
+
+    document.getElementById('refreshListBtn').addEventListener('click', fetchCertificates);
+    document.getElementById('hideAdmin').addEventListener('click', ()=>{ document.getElementById('admin-panel').style.display='none' });
+
+    document.getElementById('addCertForm').addEventListener('submit', async (e)=>{ e.preventDefault(); const fd = new FormData(e.target); const rec = {}; fd.forEach((v,k)=>rec[k]=String(v||'').trim()); if(!rec.QualificationNumber || !rec.Name){ alert('Qualification Number and Name required'); return } const added = await backendAdd(rec); if(added && added.ok){ alert('Certificate added to backend'); e.target.reset(); fetchCertificates() } else { alert('Added locally (backend unavailable)'); e.target.reset(); fetchCertificates() } });
+
+    async function deleteCertificate(q,n){ if(!confirm(`Delete ${n} (${q})?`)) return; const res = await backendDelete({ QualificationNumber: q, Name: n }); if(res && res.ok){ alert('Deleted') } else { alert('Removed locally (backend unavailable)') } fetchCertificates(); }
+
+    function generateQRCode(id,name){ const txt = `${id}|${name}`; const container = document.getElementById('qrCodeContainer'); container.innerHTML=''; QRCode.toDataURL(txt, { width: 300, margin: 2 }).then(url=>{ container.innerHTML = `<div class="flex"><div class="qr-preview"><img src="${url}" alt="QR"/></div><div style="margin-left:12px"><a href="${url}" download="certificate_qr_${encodeURIComponent(id)}.png" class="primary">Download PNG</a></div></div>` }).catch(e=>{ container.textContent='Error generating QR' }) }
+
+    document.getElementById('selfTest').addEventListener('click', async ()=>{ apiNotice.style.display='none'; apiError.style.display='none'; const results = []; const tests = [ { q: 'NC-2025-001234', n: 'Jane Doe' }, { q: 'NC-2025-005678', n: 'John Smith' }, { q: 'NOT-EXIST', n: 'Nobody' } ]; for(const t of tests){ const records = await backendList(); const found = records.find(r=>textEqual(r.QualificationNumber, t.q) && textEqual(r.Name, t.n)); results.push({ test: t, ok: !!found }) } statusEl.innerHTML = '<strong>Self-test results:</strong><br>' + results.map(r=>`${r.test.q} / ${r.test.n} => ${r.ok ? 'FOUND' : 'NOT FOUND'}`).join('<br>') });
+
+    async function backendAdd(record){ return await (await (async ()=>{ try{ const res = await timeoutFetch(BACKEND_LIST_ADD, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(Object.assign({ action: 'add' }, record)) }, 8000); if(!res.ok) throw new Error('Bad response'); const data = await res.json(); if(data && data.success) return { ok:true }; throw new Error(data && data.error ? data.error : 'Add failed'); }catch(err){ mockRecords.push(record); return { ok:false, local:true } } })()) }
+
+    async function backendDelete(record){ return await (await (async ()=>{ try{ const res = await timeoutFetch(BACKEND_DELETE, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(Object.assign({ action: 'delete' }, record)) }, 8000); if(!res.ok) throw new Error('Bad response'); const data = await res.json(); if(data && data.success) return { ok:true }; throw new Error(data && data.error ? data.error : 'Delete failed'); }catch(err){ const idx = mockRecords.findIndex(r=>r.QualificationNumber===record.QualificationNumber && r.Name===record.Name); if(idx>-1) mockRecords.splice(idx,1); return { ok:false, local:true } } })()) }
+
+    (async ()=>{ try{ const initial = await backendList(); if(initial && initial.length>0){ setApiNotice(usingMock ? 'Using fallback data' : 'Connected to backend'); } }catch(e){ setApiNotice('Using fallback data') } })();
+  </script>
+</body>
+</html>
